@@ -1,73 +1,44 @@
 #!/usr/bin/env python
 
-import socket
-import sys
 import struct
-import os
 
-from py8583 import Iso8583, MemDump, Str2Bcd
-
-    
-from py8583spec import IsoSpec1987BCD
+from py8583.py8583 import Iso8583, mem_dump
 
 
+data = b"""
+F0F1F0F0723C440188E18008F1F6F5F5
+F3F1F5F75C5C5C5C5CF1F6F5F5F4F0F0
+F0F0F0F0F0F0F0F0F0F0F0F0F2F5F0F0
+F0F8F3F0F0F9F0F6F1F5F2F2F4F4F0F0
+F1F2F0F6F1F4F0F8F3F0F2F2F1F2F4F1
+F1F1F0F1F2F0F6F0F0F5F0F3F7F0F6F2
+F0F0F1F5F4F1F2F4F2F1F2F4F4F8F0F1
+F6F2F0F1F5F6F0F6F7F1F0F1F0F0F0F0
+F1F5F6F4F6404040E3E2E340D7C1D9D2
+C94040404040404040404040404040C2
+8191929695A499404040404040D9E4E2
+F0F1F8E7F6F1F0F5F0F0F0F0F1F6F4F0
+F4F0F7F0F0F6F4F3F0F2F2F2F0F3F1F0
+F0F0F0F0F0F6F0F0F6F4F3F4F6F8F3F2
+"""
 
-HOST = ''
-PORT = 5000
+mem_dump("Received:", data)
+IsoPacket = Iso8583(data[2:])
 
-s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+IsoPacket.print_message()
 
-try:
-    s.bind((HOST, PORT))
-except socket.error as msg:
-    print ('Bind failed. Error Code : ' + str(msg[0]) + ' Message ' + msg[1])
-    sys.exit()
-    
+IsoPacket.mti("0210")
 
-s.listen(10)
+IsoPacket.field(39, 1)
+IsoPacket.field_data(39, "00")
+IsoPacket.field(2, 0)
+IsoPacket.field(35, 0)
+IsoPacket.field(52, 0)
+IsoPacket.field(60, 0)
 
+print("\n\n\n")
+IsoPacket.print_message()
+data = IsoPacket.build_iso()
+data = struct.pack("!H", len(data)) + data
 
-while True:
-    try:
-        print ('Waiting for connections')
-        conn, addr = s.accept()
-        print ('Connected: ' + addr[0] + ':' + str(addr[1]))
-        data = conn.recv(4096)
-        MemDump("Received:", data)
-        
-        Len = struct.unpack_from("!H", data[:2])[0]
-        
-        if(Len != len(data) - 2):
-            print("Invalid length {0} - {1}".format(Len, len(data) - 2))
-            conn.close()
-            continue
-        
-        IsoPacket = Iso8583(data[2:], IsoSpec1987BCD())
-        
-        IsoPacket.PrintMessage()
-        
-        IsoPacket.MTI("0210")
-        
-        IsoPacket.Field(39, 1)
-        IsoPacket.FieldData(39, "00")
-        IsoPacket.Field(2, 0)
-        IsoPacket.Field(35, 0)
-        IsoPacket.Field(52, 0)
-        IsoPacket.Field(60, 0)
-         
-        print("\n\n\n")
-        IsoPacket.PrintMessage()
-        data = IsoPacket.BuildIso()
-        data = struct.pack("!H", len(data)) + data
-         
-        MemDump("Sending:", data)
-        conn.send(data)
-        
-        
-    except Exception as ex:
-        print(ex)
-        
-    conn.close()
-    
-s.close()
-sys.exit()
+mem_dump("Sending:", data)
