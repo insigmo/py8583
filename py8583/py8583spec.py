@@ -1,4 +1,4 @@
-from py8583.py8583 import SpecError
+from py8583.errors import SpecError
 from py8583.enums import DT, LT
 
 Descriptions = {}

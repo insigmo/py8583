@@ -8,7 +8,6 @@ from py8583.py8583spec import IsoSpec1987ASCII
 
 
 log = logging.getLogger('py8583')
-secondary, primary, length = None, None, None
 
 
 def mem_dump(Title, data, size=16):
@@ -20,7 +19,7 @@ def mem_dump(Title, data, size=16):
     if not isinstance(data, bytes):
         raise TypeError("Expected bytes for data")
 
-    log.info("{} [{}]:".format(Title, len(data)))
+    log.info(f"{Title} [{ len(data)}]:")
     dump = "\n"
 
     for line in [data[i:i + size] for i in range(0, len(data), size)]:
@@ -53,7 +52,7 @@ def str_to_bcd(string):
 
 
 def bcd_to_int(bcd):
-    return int(bcd_to_str(bcd))
+    return int(bcd_to_str(bcd), 16)
 
 
 def int_to_bcd(integer):
@@ -67,7 +66,7 @@ def int_to_bcd(integer):
 class Iso8583:
     ValidContentTypes = ('a', 'n', 's', 'an', 'as', 'ns', 'ans', 'b', 'z')
 
-    def __init__(self, IsoMsg=None, IsoSpec=None):
+    def __init__(self, iso_msg=None, iso_spec=None):
 
         self._mti = None
         self.strict = False
@@ -77,16 +76,13 @@ class Iso8583:
         self._iso = b''
         self._iso_spec = None
 
-        if IsoSpec is not None:
-            self._iso_spec = IsoSpec
-        else:
-            self._iso_spec = IsoSpec1987ASCII()
+        self._iso_spec = iso_spec if iso_spec is not None else IsoSpec1987ASCII()
 
-        if IsoMsg is not None:
-            if not isinstance(IsoMsg, bytes):
+        if iso_msg is not None:
+            if not isinstance(iso_msg, bytes):
                 raise TypeError("Expected bytes for iso message")
 
-            self._iso = IsoMsg
+            self._iso = iso_msg
             self.parse_iso()
 
     def strict(self, Value):
@@ -94,10 +90,10 @@ class Iso8583:
             raise ValueError
         self.strict = Value
 
-    def set_iso_content(self, IsoMsg):
-        if not isinstance(IsoMsg, bytes):
+    def set_iso_content(self, iso_msg):
+        if not isinstance(iso_msg, bytes):
             raise TypeError("Expected bytes for iso message")
-        self._iso = IsoMsg
+        self._iso = iso_msg
         self.parse_iso()
 
     def parse_mti(self, p):
@@ -119,13 +115,14 @@ class Iso8583:
             if self._mti[1] == '0':
                 raise ParseError("Invalid mti: Invalid Message type [{0}]".format(self._mti))
 
-            if int(self._mti[3]) > 5:
+            if int(self._mti[3], 16) > 5:
                 raise ParseError("Invalid mti: Invalid Message origin [{0}]".format(self._mti))
 
         return p
 
     def parse_bitmap(self, p):
-        global secondary, primary
+        secondary, primary = None, None
+
         data_type = self._iso_spec.data_type(1)
 
         if data_type == DT.BIN:
@@ -156,8 +153,8 @@ class Iso8583:
         return p
 
     def parse_field(self, field, p):
+        length = 0
 
-        global length
         try:
             data_type = self._iso_spec.data_type(field)
             len_type = self._iso_spec.length_type(field)
@@ -177,7 +174,7 @@ class Iso8583:
             elif len_type == LT.LLVAR:
                 length_data_type = self._iso_spec.length_data_type(field)
                 if length_data_type == DT.ASCII:
-                    length = int(self._iso[p:p + 2])
+                    length = int(self._iso[p:p + 2], 16)
                     p += 2
                 elif length_data_type == DT.BCD:
                     length = bcd_to_int(self._iso[p:p + 1])
@@ -187,7 +184,7 @@ class Iso8583:
             elif len_type == LT.LLLVAR:
                 length_data_type = self._iso_spec.length_data_type(field)
                 if length_data_type == DT.ASCII:
-                    length = int(self._iso[p:p + 3])
+                    length = int(self._iso[p:p + 3], 16)
                     p += 3
                 elif length_data_type == DT.BCD:
                     length = bcd_to_int(self._iso[p:p + 2])
@@ -195,23 +192,20 @@ class Iso8583:
                 else:
                     raise ParseError('Unsupported length data type')
         except ValueError as ex:
-            raise ParseError("Cannot parse F{0} - Invalid length: {1}".format(field, ex))
+            raise ParseError(f"Cannot parse F{field} - Invalid length: {ex}")
 
         if length > max_length:
-            raise ParseError("F{0} is larger than maximum length ({1}>{2})".format(field, length, max_length))
+            raise ParseError(f"F{field} is larger than maximum length ({length}>{max_length})")
 
         # In case of zero length, don't try to parse the field itself, just continue
         if length == 0:
-            if content_type == 'n':
-                self._field_data[field] = None
-            else:
-                self._field_data[field] = ''
+            self._field_data[field] = None if content_type == 'n' else ''
             return p
 
         try:
             if data_type == DT.ASCII:
                 if content_type == 'n':
-                    self._field_data[field] = int(self._iso[p:p + length])
+                    self._field_data[field] = int(self._iso[p:p + length], 16)
                 else:
                     self._field_data[field] = self._iso[p:p + length].decode('latin')
                 p += length
@@ -227,7 +221,7 @@ class Iso8583:
                 self._field_data[field] = binascii.hexlify(self._iso[p:p + length]).decode('latin').upper()
                 p += length
         except Exception as ex:
-            raise ParseError("Cannot parse F{}: {}".format(field, str(ex))) from None
+            raise ParseError(f"Cannot parse F{field}: {ex}")
 
         if content_type == 'z':
             self._field_data[field] = self._field_data[field].replace("D", "=")  # in track2, replace d with =
@@ -264,7 +258,6 @@ class Iso8583:
         for i in range(1, 65):
             if i in self._bitmap.keys():
                 int_primary |= (self._bitmap[i] & 0x1) << (64 - i)
-        global primary, secondary
         primary = struct.pack("!Q", int_primary)
 
         if data_type == DT.BIN:
@@ -296,7 +289,6 @@ class Iso8583:
         except Exception:
             raise SpecError("Cannot parse F{0}: Incomplete field specification".format(field))
 
-        global length
         if len_type == LT.FIXED:
             length = max_length
 
@@ -400,38 +392,38 @@ class Iso8583:
         else:
             mti = mti.zfill(4)
 
-            if int(mti[0]) not in list(map(int, MsgVersion)):
+            if int(mti[0], 16) not in list(map(int, MsgVersion)):
                 raise ValueError("Invalid mti [{0}]: Invalid message version".format(mti))
 
-            if int(mti[1]) not in list(map(int, MsgClass)):
+            if int(mti[1], 16) not in list(map(int, MsgClass)):
                 raise ValueError("Invalid mti [{0}]: Invalid message class".format(mti))
 
-            if int(mti[2]) not in list(map(int, MsgFunction)):
+            if int(mti[2], 16) not in list(map(int, MsgFunction)):
                 raise ValueError("Invalid mti [{0}]: Invalid message class".format(mti))
 
-            if int(mti[3]) not in list(map(int, MsgOrigin)):
+            if int(mti[3], 16) not in list(map(int, MsgOrigin)):
                 raise ValueError("Invalid mti [{0}]: Invalid message class".format(mti))
 
             self._mti = mti
 
     def version(self):
         for i in MsgVersion:
-            if int(self._mti[0]) == i.value:
+            if int(self._mti[0], 16) == i.value:
                 return i
 
     def msg_class(self):
         for i in MsgClass:
-            if int(self._mti[1]) == i.value:
+            if int(self._mti[1], 16) == i.value:
                 return i
 
     def function(self):
         for i in MsgFunction:
-            if int(self._mti[2]) == i.value:
+            if int(self._mti[2], 16) == i.value:
                 return i
 
     def origin(self):
         for i in MsgOrigin:
-            if int(self._mti[3]) == i.value:
+            if int(self._mti[3], 16) == i.value:
                 return i
 
     def description(self, field, description=None):
