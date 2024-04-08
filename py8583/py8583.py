@@ -163,36 +163,35 @@ class Iso8583:
         except Exception:
             raise SpecError("Cannot parse F{0}: Incomplete field specification".format(field))
 
-        try:
-            if data_type == DT.ASCII and content_type == 'b':
-                max_length *= 2
+        # try:
+        if data_type == DT.ASCII and content_type == 'b':
+            max_length *= 2
 
-            if len_type == LT.FIXED:
-                length = max_length
-            elif len_type == LT.LVAR:
-                pass
-            elif len_type == LT.LLVAR:
-                length_data_type = self._iso_spec.length_data_type(field)
-                if length_data_type == DT.ASCII:
-                    length = int(self._iso[p:p + 2], 16)
-                    p += 2
-                elif length_data_type == DT.BCD:
-                    length = bcd_to_int(self._iso[p:p + 1])
-                    p += 1
-                else:
-                    raise ParseError('Unsupported length data type')
-            elif len_type == LT.LLLVAR:
-                length_data_type = self._iso_spec.length_data_type(field)
-                if length_data_type == DT.ASCII:
-                    length = int(self._iso[p:p + 3], 16)
-                    p += 3
-                elif length_data_type == DT.BCD:
-                    length = bcd_to_int(self._iso[p:p + 2])
-                    p += 2
-                else:
-                    raise ParseError('Unsupported length data type')
-        except ValueError as ex:
-            raise ParseError(f"Cannot parse F{field} - Invalid length: {ex}")
+        if len_type == LT.FIXED:
+            length = max_length
+        elif len_type == LT.LVAR:
+            pass
+        elif len_type == LT.LLVAR:
+            length_data_type = self._iso_spec.length_data_type(field)
+            if length_data_type == DT.ASCII:
+                length = int(self._iso[p:p + 2], 16)
+                p += 2
+            elif length_data_type == DT.BCD:
+                length = bcd_to_int(self._iso[p:p + 1])
+                p += 1
+            else:
+                raise ParseError('Unsupported length data type')
+        elif len_type == LT.LLLVAR:
+            length_data_type = self._iso_spec.length_data_type(field)
+            if length_data_type == DT.ASCII:
+                if b := self._iso[p:p + 3]:
+                    length = int(b, 16)
+                p += 3
+            elif length_data_type == DT.BCD:
+                length = bcd_to_int(self._iso[p:p + 2])
+                p += 2
+            else:
+                raise ParseError('Unsupported length data type')
 
         if length > max_length:
             raise ParseError(f"F{field} is larger than maximum length ({length}>{max_length})")
@@ -202,26 +201,26 @@ class Iso8583:
             self._field_data[field] = None if content_type == 'n' else ''
             return p
 
-        try:
-            if data_type == DT.ASCII:
-                if content_type == 'n':
-                    self._field_data[field] = int(self._iso[p:p + length], 16)
-                else:
-                    self._field_data[field] = self._iso[p:p + length].decode('latin')
-                p += length
-            elif data_type == DT.BCD:
-                if length % 2 == 1:
-                    length += 1
-                if content_type == 'n':
-                    self._field_data[field] = bcd_to_int(self._iso[p:p + (length // 2)])
-                elif content_type == 'z':
-                    self._field_data[field] = binascii.hexlify(self._iso[p:p + (length // 2)]).decode('latin').upper()
-                p += length // 2
-            elif data_type == DT.BIN:
-                self._field_data[field] = binascii.hexlify(self._iso[p:p + length]).decode('latin').upper()
-                p += length
-        except Exception as ex:
-            raise ParseError(f"Cannot parse F{field}: {ex}")
+        # try:
+        if data_type == DT.ASCII:
+            if content_type == 'n':
+                self._field_data[field] = int(self._iso[p:p + length], 16)
+            else:
+                self._field_data[field] = self._iso[p:p + length].decode('latin')
+            p += length
+        elif data_type == DT.BCD:
+            if length % 2 == 1:
+                length += 1
+            if content_type == 'n':
+                self._field_data[field] = bcd_to_int(self._iso[p:p + (length // 2)])
+            elif content_type == 'z':
+                self._field_data[field] = binascii.hexlify(self._iso[p:p + (length // 2)]).decode('latin').upper()
+            p += length // 2
+        elif data_type == DT.BIN:
+            self._field_data[field] = binascii.hexlify(self._iso[p:p + length]).decode('latin').upper()
+            p += length
+        # except Exception as ex:
+        #     raise ParseError(f"Cannot parse F{field}: {ex}")
 
         if content_type == 'z':
             self._field_data[field] = self._field_data[field].replace("D", "=")  # in track2, replace d with =
@@ -237,7 +236,10 @@ class Iso8583:
         for field in sorted(self._bitmap):
             # field 1 is parsed by the bitmap function
             if field != 1 and self.field(field) == 1:
-                p = self.parse_field(field, p)
+                try:
+                    p = self.parse_field(field, p)
+                except Exception:
+                    break
 
     def build_mti(self):
         if self._iso_spec.data_type('mti') == DT.BCD:
@@ -455,11 +457,7 @@ class Iso8583:
             if i == 1:
                 continue
             if self._bitmap[i] == 1:
-
-                try:
-                    field_data = self._field_data[i]
-                except KeyError:
-                    field_data = ''
+                field_data = '' if not self._field_data.get(i) else f
 
                 if self.content_type(i) == 'n' and self._iso_spec.length_type(i) == LT.FIXED:
                     field_data = str(field_data).zfill(self._iso_spec.max_length(i))
